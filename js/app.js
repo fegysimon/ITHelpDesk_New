@@ -11,8 +11,22 @@ async function hash(pw, salt) {
 }
 const newSalt = () => [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
 
+/* Built-in users (salted SHA-256 hashes). Merged into storage on every page load. */
+const PRESET_USERS = [
+  { username: 'john', name: 'John Sunder', role: 'user', salt: '1c3342d9559bda2672019193dfc88ed5', hash: 'bfeac46f9619f2357c9823961d7fe04d193ec1c96fe0e1569a4e0df6ec05da88' },
+  { username: 'kumar', name: 'Kumar Sanjeevi', role: 'user', salt: '4bb4342f9223840069a12ea6eadcd88d', hash: 'fb1933eedbf9a5763ff28aaff2d0cde6ef130ea3973a4aa92e125596ba88c340' },
+  { username: 'stalin', name: 'Stalin Singh', role: 'user', salt: '447d645db5c8ba15a1ddb1c1a5d3a827', hash: '433927acf02454de6f65a44cf1694ca3de0babdda31201838545fb3b17cc52bf' },
+  { username: 'jayaraman', name: 'Jayaraman Krish', role: 'user', salt: 'd75424bebab029dca7e467f17c7fbd1b', hash: 'f6ef43b12011702c257383dd5d49ab0cc625bb900185bba71a86b6501f8fe6a9' },
+  { username: 'fegy', name: 'Fegy Simon', role: 'user', salt: '631f191a9769a51dce818dc389ee9184', hash: 'a7cbf0e1b8e01744448abfd6c1fbf240d655e8cd114844c1f354160003eec848' }
+];
+function mergePresets() {
+  const a = load('hd_users', []);
+  PRESET_USERS.forEach(p => { if (!a.some(u => u.username === p.username)) a.push({ ...p }); });
+  save('hd_users', a);
+}
+
 async function seed() {
-  if (load('hd_users', null)) return;
+  if (load('hd_users', null)) return mergePresets();
   const mk = async (username, name, role, pw) => { const salt = newSalt(); return { username, name, role, salt, hash: await hash(pw, salt) }; };
   save('hd_users', [
     await mk('admin', 'Help Desk Admin', 'admin', 'Admin#2026'),
@@ -22,6 +36,7 @@ async function seed() {
     { id: 1001, owner: 'user', title: 'VPN disconnects every 10 minutes', category: 'Network', priority: 'High', desc: 'Drops on home Wi-Fi.', status: 'In-Progress', created: Date.now() - 864e5 * 2 },
     { id: 1002, owner: 'user', title: 'Need Visio license', category: 'Software', priority: 'Low', desc: 'For network diagrams.', status: 'Open', created: Date.now() - 864e5 }
   ]);
+  mergePresets();
 }
 
 /* ---- session ---- */
