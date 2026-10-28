@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tickets - IT Help Desk</title><link rel="stylesheet" href="css/style.css"></head>
+<body><main>
+<h1>Tickets</h1>
+<div class="card"><h2>Submit a new ticket</h2>
+<form id="f">
+ <label for="t">Title</label><input id="t" required maxlength="120">
+ <div class="row"><div><label for="c">Category</label><select id="c"><option>Hardware</option><option>Software</option><option>Network</option><option>Access / Password</option><option>Other</option></select></div>
+ <div><label for="pr">Priority</label><select id="pr"><option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option></select></div></div>
+ <label for="d">Description</label><textarea id="d" required maxlength="2000"></textarea>
+ <button>Submit ticket</button><div class="msg" id="m"></div>
+</form></div>
+<div class="card"><h2 id="lt">My tickets</h2>
+<table><thead><tr><th>#</th><th>Title</th><th>Category</th><th>Priority</th><th>Created</th><th>Status</th></tr></thead><tbody id="tb"></tbody></table></div>
+</main>
+<script src="js/app.js"></script>
+<script>
+let s;
+function render() {
+  const all = tickets(), t = all.filter(x => s.role === 'admin' || x.owner === s.username).sort((a, b) => b.created - a.created);
+  $('#tb').innerHTML = t.map(x => `<tr><td>${x.id}</td><td><b>${esc(x.title)}</b><br><small>${esc(x.desc)}${s.role === 'admin' ? ' (by ' + esc(x.owner) + ')' : ''}</small></td>
+    <td>${esc(x.category)}</td><td>${esc(x.priority)}</td><td>${fmt(x.created)}</td>
+    <td>${s.role === 'admin' ? `<select data-id="${x.id}" class="st">${['Open', 'In-Progress', 'Resolved'].map(o => `<option ${o === x.status ? 'selected' : ''}>${o}</option>`).join('')}</select>` : `<span class="tag ${x.status}">${x.status}</span>`}</td></tr>`).join('') || '<tr><td colspan="6">No tickets.</td></tr>';
+  document.querySelectorAll('.st').forEach(sel => sel.onchange = () => {
+    const a = tickets(); a.find(x => x.id == sel.dataset.id).status = sel.value; save('hd_tickets', a);
+  });
+}
+(async () => {
+  await seed(); s = guard('tickets.html');
+  if (s.role === 'admin') $('#lt').textContent = 'All tickets';
+  render();
+  $('#f').onsubmit = e => {
+    e.preventDefault();
+    const a = tickets(), id = Math.max(1000, ...a.map(x => x.id)) + 1;
+    a.push({ id, owner: s.username, title: $('#t').value.trim(), category: $('#c').value, priority: $('#pr').value, desc: $('#d').value.trim(), status: 'Open', created: Date.now() });
+    save('hd_tickets', a); e.target.reset(); render();
+    $('#m').className = 'msg ok'; $('#m').textContent = 'Ticket #' + id + ' submitted.';
+  };
+})();
+</script></body></html>

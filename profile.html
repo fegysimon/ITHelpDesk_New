@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Profile - IT Help Desk</title><link rel="stylesheet" href="css/style.css"></head>
+<body><main>
+<h1>Profile</h1>
+<div class="row">
+ <div class="card"><h2>Account</h2><p id="info"></p><p id="exp" style="color:var(--mut);font-size:13px"></p></div>
+ <div class="card"><h2>Change password</h2>
+  <form id="pf"><label for="o">Current password</label><input id="o" type="password" autocomplete="current-password" required>
+  <label for="n">New password (12+ chars, mixed case, number)</label><input id="n" type="password" autocomplete="new-password" required>
+  <button>Update password</button><div class="msg" id="pm"></div></form></div>
+</div>
+<div id="admin" style="display:none">
+ <div class="card"><h2>Admin: users</h2>
+  <table><thead><tr><th>Username</th><th>Name</th><th>Role</th><th></th></tr></thead><tbody id="ut"></tbody></table>
+  <h2 style="margin-top:20px">Add user</h2>
+  <form id="uf" class="row"><div><label for="nu">Username</label><input id="nu" required pattern="[a-z0-9._-]{3,30}"></div>
+  <div><label for="nn">Full name</label><input id="nn" required></div>
+  <div><label for="np">Temporary password</label><input id="np" type="password" required></div>
+  <div><label for="nr">Role</label><select id="nr"><option>user</option><option>admin</option></select></div>
+  <div><button>Create user</button></div></form><div class="msg" id="um"></div></div>
+</div></main>
+<script src="js/app.js"></script>
+<script>
+const strong = p => p.length >= 12 && /[a-z]/.test(p) && /[A-Z]/.test(p) && /\d/.test(p);
+const say = (id, t, ok) => { const m = $(id); m.className = 'msg ' + (ok ? 'ok' : 'err'); m.textContent = t; };
+let s;
+function users() {
+  $('#ut').innerHTML = load('hd_users', []).map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.name)}</td><td>${u.role}</td>
+   <td>${u.username === s.username ? '' : `<button class="sm" data-u="${esc(u.username)}">Delete</button>`}</td></tr>`).join('');
+  document.querySelectorAll('[data-u]').forEach(b => b.onclick = () => {
+    save('hd_users', load('hd_users', []).filter(u => u.username !== b.dataset.u)); users();
+  });
+}
+(async () => {
+  await seed(); s = guard('profile.html');
+  $('#info').innerHTML = `<b>${esc(s.name)}</b><br>Username: ${esc(s.username)}<br>Role: ${esc(s.role)}`;
+  $('#exp').textContent = 'Session ends after 15 minutes of inactivity.';
+  $('#pf').onsubmit = async e => {
+    e.preventDefault();
+    const a = load('hd_users', []), u = a.find(x => x.username === s.username);
+    if ((await hash($('#o').value, u.salt)) !== u.hash) return say('#pm', 'Current password is incorrect.');
+    if (!strong($('#n').value)) return say('#pm', 'New password does not meet requirements.');
+    u.salt = newSalt(); u.hash = await hash($('#n').value, u.salt); save('hd_users', a);
+    e.target.reset(); say('#pm', 'Password updated.', true);
+  };
+  if (s.role === 'admin') {
+    $('#admin').style.display = 'block'; users();
+    $('#uf').onsubmit = async e => {
+      e.preventDefault();
+      const a = load('hd_users', []), un = $('#nu').value.trim().toLowerCase();
+      if (a.some(x => x.username === un)) return say('#um', 'Username already exists.');
+      if (!strong($('#np').value)) return say('#um', 'Password must be 12+ chars with upper, lower and a number.');
+      const salt = newSalt();
+      a.push({ username: un, name: $('#nn').value.trim(), role: $('#nr').value, salt, hash: await hash($('#np').value, salt) });
+      save('hd_users', a); e.target.reset(); users(); say('#um', 'User created.', true);
+    };
+  }
+})();
+</script></body></html>

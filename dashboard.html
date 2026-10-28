@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard - IT Help Desk</title><link rel="stylesheet" href="css/style.css"></head>
+<body><main>
+<h1 id="hi"></h1>
+<div class="grid" id="stats"></div>
+<div class="row">
+ <div class="card"><h2>Recent tickets</h2><table><thead><tr><th>#</th><th>Title</th><th>Status</th></tr></thead><tbody id="rt"></tbody></table></div>
+ <div class="card"><h2>Announcements</h2>
+  <p><b>Planned maintenance</b><br>Email gateway: Saturday 22:00-23:00.</p>
+  <p><b>MFA reminder</b><br>All staff must enroll in MFA by month-end.</p>
+  <p><b>Support hours</b><br>Mon-Fri 08:00-18:00. Urgent issues: ext. 5555.</p></div>
+</div></main>
+<script src="js/app.js"></script>
+<script>
+(async () => {
+  await seed();
+  const s = guard('dashboard.html');
+  $('#hi').textContent = 'Welcome, ' + s.name;
+  const t = tickets().filter(x => s.role === 'admin' || x.owner === s.username);
+  const c = k => t.filter(x => x.status === k).length;
+  $('#stats').innerHTML = [['Total', t.length], ['Open', c('Open')], ['In progress', c('In-Progress')], ['Resolved', c('Resolved')]]
+    .map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
+  $('#rt').innerHTML = t.sort((a, b) => b.created - a.created).slice(0, 5)
+    .map(x => `<tr><td>${x.id}</td><td>${esc(x.title)}</td><td><span class="tag ${x.status}">${x.status}</span></td></tr>`).join('') || '<tr><td colspan="3">No tickets yet.</td></tr>';
+})();
+</script></body></html>

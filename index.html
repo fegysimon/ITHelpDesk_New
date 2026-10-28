@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IT Help Desk - Sign in</title><link rel="stylesheet" href="css/style.css"></head>
+<body><div class="login-wrap"><form class="login" id="f" autocomplete="on">
+<h1>IT Help Desk</h1><p>Sign in to continue</p>
+<label for="u">Username</label><input id="u" name="username" autocomplete="username" required autofocus>
+<label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required>
+<button type="submit">Sign in</button>
+<div class="msg" id="m" role="alert"></div>
+<div class="hint">Demo accounts: <b>admin</b> / Admin#2026 &nbsp;|&nbsp; <b>user</b> / User#2026</div>
+</form></div>
+<script src="js/app.js"></script>
+<script>
+seed(); if (session()) location.replace('dashboard.html');
+const r = new URLSearchParams(location.search).get('r'), m = $('#m');
+if (r === 'expired') { m.className = 'msg err'; m.textContent = 'Please sign in to continue (session ended).'; }
+$('#f').onsubmit = async e => {
+  e.preventDefault();
+  const res = await login($('#u').value.trim(), $('#p').value);
+  if (res.ok) location.replace('dashboard.html');
+  else { m.className = 'msg err'; m.textContent = res.err; $('#p').value = ''; }
+};
+</script></body></html>
