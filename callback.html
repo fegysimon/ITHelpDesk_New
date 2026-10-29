@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signing in...</title><link rel="stylesheet" href="css/style.css"></head>
+<body><div class="login-wrap"><div class="login"><h1>Signing you in...</h1><p id="s">One moment.</p>
+<div class="msg" id="m" role="alert"></div><a id="back" href="index.html" style="display:none">Back to sign in</a></div></div>
+<script src="js/app.js"></script>
+<script>
+(async () => {
+  const fail = t => { $('#m').className = 'msg err'; $('#m').textContent = t; $('#back').style.display = 'inline'; $('#s').textContent = ''; };
+  try {
+    const params = location.hash.length > 1 ? new URLSearchParams(location.hash.slice(1)) : new URLSearchParams(location.search);
+    const state = params.get('state'), raw = sessionStorage.getItem('hd_oauth_' + state);
+    if (!raw) return fail('Sign-in session not found. Please start again.');
+    const p = JSON.parse(raw); sessionStorage.removeItem('hd_oauth_' + state);
+
+    if (params.get('error')) {
+      // Silent code request failed (e.g. Okta session ended): retry with a visible login
+      if (p.kind === 'code' && p.prompt === 'none') return oktaAuthorize('code', { returnTo: p.returnTo });
+      return fail('Okta error: ' + params.get('error') + ' - ' + (params.get('error_description') || ''));
+    }
+
+    if (p.kind === 'id_token') {
+      const idt = params.get('id_token'), c = jwtClaims(idt);
+      if (c.nonce !== p.nonce || c.aud !== OKTA.clientId || c.iss !== OKTA.issuer || c.exp * 1000 < Date.now()) return fail('Sign-in token was not valid.');
+      const email = (c.email || c.preferred_username || c.sub).toLowerCase();
+      sessionStorage.setItem('hd_idtoken', idt);
+      startSession({ username: email, name: c.name || [c.given_name, c.family_name].filter(Boolean).join(' ') || email, role: OKTA.admins.includes(email) ? 'admin' : 'user' });
+      // Now get an authorization code for Genesys Messenger (silent: Okta already knows the user)
+      return oktaAuthorize('code', { prompt: 'none', returnTo: p.returnTo });
+    }
+
+    if (p.kind === 'code') {
+      sessionStorage.setItem('hd_pending_code', JSON.stringify({
+        authCode: params.get('code'), redirectUri: pageUrl('callback.html'), nonce: p.nonce, codeVerifier: p.verifier, iss: params.get('iss') || ''
+      }));
+      sessionStorage.removeItem('hd_last_silent');
+      if (!session()) return location.replace('index.html');
+      return location.replace(p.returnTo);
+    }
+  } catch (e) { fail('Sign-in failed: ' + e.message); }
+})();
+</script></body></html>

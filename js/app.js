@@ -52,7 +52,46 @@ function startSession(u) {
   sessionStorage.setItem('hd_session', JSON.stringify({ username: u.username, name: u.name, role: u.role, exp: Date.now() + IDLE_MS }));
 }
 const touch = () => { const s = session(); if (s) { s.exp = Date.now() + IDLE_MS; sessionStorage.setItem('hd_session', JSON.stringify(s)); } };
-function logout(reason) { sessionStorage.removeItem('hd_session'); location.replace('index.html' + (reason ? '?r=' + reason : '')); }
+/* ---- Okta (OIDC) sign-in ---- */
+/* Identity provider settings (Auth0). Name kept as OKTA so the rest of the code is unchanged. */
+const AUTH0_DOMAIN = 'dev-tbmjt7lcunawq407.us.auth0.com';   // <-- paste your Auth0 Domain (no https://)
+const OKTA = {
+  issuer: 'https://' + AUTH0_DOMAIN + '/',          // must match "issuer" in the discovery document (note trailing slash)
+  clientId: '9jEonav3V4Dix7TEh0G5BSj4Arrnkhg2',                // <-- paste your Auth0 Client ID
+  authorizeUrl: 'https://' + AUTH0_DOMAIN + '/authorize',
+  logoutUrl: (idt, back) => 'https://' + AUTH0_DOMAIN + '/v2/logout?client_id=' + encodeURIComponent(OKTA.clientId) + '&returnTo=' + encodeURIComponent(back),
+  codeScope: 'openid profile email',                // add ' offline_access' only if your Genesys setup needs refresh tokens
+  admins: ['fegy.simon@genesys.com']                // emails that get the admin role
+};
+const pageUrl = f => new URL(f, location.href).href;
+const rand = () => crypto.randomUUID();
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const jwtClaims = t => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))));
+
+/* kind 'id_token' = identify the user for this website; kind 'code' = get an auth code for Genesys Messenger */
+async function oktaAuthorize(kind, opts = {}) {
+  const state = rand(), nonce = rand();
+  const p = { kind, nonce, prompt: opts.prompt || '', returnTo: opts.returnTo || 'dashboard.html' };
+  const q = new URLSearchParams({ client_id: OKTA.clientId, redirect_uri: pageUrl('callback.html'), state, nonce,
+    scope: kind === 'code' ? OKTA.codeScope : 'openid profile email' });
+  if (kind === 'code') {
+    const v = b64url(crypto.getRandomValues(new Uint8Array(32)));
+    p.verifier = v;
+    q.set('response_type', 'code'); q.set('code_challenge_method', 'S256');
+    q.set('code_challenge', b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v))));
+  } else { q.set('response_type', 'id_token'); q.set('response_mode', 'fragment'); }
+  if (opts.prompt) q.set('prompt', opts.prompt);
+  sessionStorage.setItem('hd_oauth_' + state, JSON.stringify(p));
+  location.assign(OKTA.authorizeUrl + '?' + q);
+}
+
+async function logout(reason) {
+  try { if (window.Genesys) await Promise.race([new Promise(r => Genesys('command', 'Auth.logout', {}, r, r)), new Promise(r => setTimeout(r, 1500))]); } catch { }
+  const idt = sessionStorage.getItem('hd_idtoken');
+  ['hd_session', 'hd_idtoken', 'hd_pending_code', 'hd_last_silent'].forEach(k => sessionStorage.removeItem(k));
+  if (!reason && idt) location.replace(OKTA.logoutUrl(idt, pageUrl('index.html')));
+  else location.replace('index.html' + (reason ? '?r=' + reason : ''));
+}
 
 async function login(username, pw) {
   await seed();
@@ -71,6 +110,47 @@ async function login(username, pw) {
   return { ok: true };
 }
 
+/* ---- Genesys Web Messenger ---- */
+/* Fill these in from Admin > Message > Messenger Deployments > your deployment > "Install snippet" */
+const GENESYS = {
+  environment: 'prod-aps1',   // e.g. 'prod-usw2', 'prod-euw1'
+  deploymentId: 'e35ff7ce-18d1-40aa-aa2c-061281b7d52c'   // your deployment GUID
+};
+function initMessenger(s) {
+  if (!GENESYS.environment || !GENESYS.deploymentId) { console.warn('Genesys Messenger not configured (see GENESYS in js/app.js)'); return; }
+  if (window.Genesys) return;
+  (function (g, e, n, es, ys) {
+    g['_genesysJs'] = e;
+    g[e] = g[e] || function () { (g[e].q = g[e].q || []).push(arguments); };
+    g[e].t = 1 * new Date(); g[e].c = es;
+    ys = document.createElement('script'); ys.async = 1; ys.src = n; ys.charset = 'utf-8'; document.head.appendChild(ys);
+  })(window, 'Genesys', 'https://apps.' + ({ 'prod-usw2': 'usw2.pure.cloud', 'prod-euw1': 'mypurecloud.ie', 'prod-aps1': 'aps1.pure.cloud', 'prod-apse2': 'mypurecloud.com.au', 'prod-apne1': 'mypurecloud.jp', 'prod-cac1': 'cac1.pure.cloud', 'prod-euw2': 'euw2.pure.cloud', 'prod-euc1': 'mypurecloud.de' }[GENESYS.environment] || 'mypurecloud.com') + '/genesys-bootstrap/genesys.min.js',
+    { environment: GENESYS.environment, deploymentId: GENESYS.deploymentId });
+  // Authenticated messaging: hand Messenger an Okta authorization code when it asks for one
+  Genesys('registerPlugin', 'AuthProvider', AuthProvider => {
+    AuthProvider.registerCommand('getAuthCode', e => {
+      const raw = sessionStorage.getItem('hd_pending_code');
+      if (raw) {
+        sessionStorage.removeItem('hd_pending_code');
+        const d = JSON.parse(raw);
+        const out = { authCode: d.authCode, redirectUri: d.redirectUri, nonce: d.nonce, codeVerifier: d.codeVerifier };
+        if (d.iss) out.iss = d.iss;
+        return e.resolve(out);
+      }
+      // No code yet: fetch one silently from Okta (guard against redirect loops)
+      const last = +sessionStorage.getItem('hd_last_silent') || 0;
+      if (Date.now() - last < 8000) return e.reject('Could not obtain an Okta authorization code');
+      sessionStorage.setItem('hd_last_silent', Date.now());
+      oktaAuthorize('code', { prompt: 'none', returnTo: location.pathname.split('/').pop() || 'dashboard.html' });
+    });
+    AuthProvider.registerCommand('reAuthenticate', e => {
+      oktaAuthorize('code', { returnTo: location.pathname.split('/').pop() || 'dashboard.html' });
+      e.resolve();
+    });
+    AuthProvider.ready();
+  });
+}
+
 /* ---- page guard + nav ---- */
 function guard(page, adminOnly = false) {
   const s = session();
@@ -81,6 +161,7 @@ function guard(page, adminOnly = false) {
     `<header><div class="brand">IT Help Desk</div><nav>${links.map(([h, t]) => `<a href="${h}" class="${h === page ? 'active' : ''}">${t}</a>`).join('')}</nav>
      <div class="who">${esc(s.name)} (${esc(s.role)}) <button class="ghost" id="lo">Sign out</button></div></header>`);
   $('#lo').onclick = () => logout();
+  initMessenger(s);
   ['click', 'keydown', 'mousemove'].forEach(e => document.addEventListener(e, touch, { passive: true }));
   setInterval(() => { if (!session()) logout('expired'); }, 15000);
   return s;
