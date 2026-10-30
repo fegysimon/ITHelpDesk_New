@@ -31,7 +31,7 @@
 
     if (p.kind === 'code') {
       sessionStorage.setItem('hd_pending_code', JSON.stringify({
-        authCode: params.get('code'), redirectUri: pageUrl('callback.html'), nonce: p.nonce, codeVerifier: p.verifier, iss: params.get('iss') || ''
+        authCode: params.get('code'), redirectUri: pageUrl('callback.html'), nonce: p.nonce, codeVerifier: p.verifier, iss: params.get('iss') || '', t: Date.now()
       }));
       sessionStorage.removeItem('hd_last_silent');
       if (!session()) return location.replace('index.html');

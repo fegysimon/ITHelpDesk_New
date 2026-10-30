@@ -116,38 +116,73 @@ const GENESYS = {
   environment: 'prod-aps1',   // e.g. 'prod-usw2', 'prod-euw1'
   deploymentId: 'e35ff7ce-18d1-40aa-aa2c-061281b7d52c'   // your deployment GUID
 };
+/* On-page status box so you can see Messenger/auth progress without DevTools. Set to false to hide. */
+const SHOW_DEBUG = true;
+function dbg(msg) {
+  console.info('[HD] ' + msg);
+  if (!SHOW_DEBUG) return;
+  let b = document.getElementById('hd-dbg');
+  if (!b) {
+    b = document.createElement('div'); b.id = 'hd-dbg';
+    b.style.cssText = 'position:fixed;left:8px;bottom:8px;max-width:340px;background:#14213d;color:#cfe;font:12px/1.4 monospace;padding:8px 10px;border-radius:6px;z-index:99999;opacity:.92';
+    document.body.appendChild(b);
+  }
+  b.innerHTML += esc(new Date().toLocaleTimeString() + '  ' + msg) + '<br>';
+}
 function initMessenger(s) {
+  dbg('Signed in as ' + s.username + ' (' + s.name + ')');
   if (!GENESYS.environment || !GENESYS.deploymentId) { console.warn('Genesys Messenger not configured (see GENESYS in js/app.js)'); return; }
   if (window.Genesys) return;
   (function (g, e, n, es, ys) {
     g['_genesysJs'] = e;
     g[e] = g[e] || function () { (g[e].q = g[e].q || []).push(arguments); };
     g[e].t = 1 * new Date(); g[e].c = es;
-    ys = document.createElement('script'); ys.async = 1; ys.src = n; ys.charset = 'utf-8'; document.head.appendChild(ys);
+    ys = document.createElement('script'); ys.async = 1; ys.src = n; ys.charset = 'utf-8';
+    ys.onload = () => dbg('Genesys script loaded'); ys.onerror = () => dbg('ERROR: Genesys script failed to load (check environment / network)');
+    document.head.appendChild(ys);
   })(window, 'Genesys', 'https://apps.' + ({ 'prod-usw2': 'usw2.pure.cloud', 'prod-euw1': 'mypurecloud.ie', 'prod-aps1': 'aps1.pure.cloud', 'prod-apse2': 'mypurecloud.com.au', 'prod-apne1': 'mypurecloud.jp', 'prod-cac1': 'cac1.pure.cloud', 'prod-euw2': 'euw2.pure.cloud', 'prod-euc1': 'mypurecloud.de' }[GENESYS.environment] || 'mypurecloud.com') + '/genesys-bootstrap/genesys.min.js',
     { environment: GENESYS.environment, deploymentId: GENESYS.deploymentId });
   // Authenticated messaging: hand Messenger an Okta authorization code when it asks for one
   Genesys('registerPlugin', 'AuthProvider', AuthProvider => {
-    AuthProvider.registerCommand('getAuthCode', e => {
+    // Returns the stored auth code if it is still fresh (codes are single-use and short-lived), else null
+    const takeCode = () => {
       const raw = sessionStorage.getItem('hd_pending_code');
-      if (raw) {
-        sessionStorage.removeItem('hd_pending_code');
-        const d = JSON.parse(raw);
-        const out = { authCode: d.authCode, redirectUri: d.redirectUri, nonce: d.nonce, codeVerifier: d.codeVerifier };
-        if (d.iss) out.iss = d.iss;
-        return e.resolve(out);
-      }
-      // No code yet: fetch one silently from Okta (guard against redirect loops)
+      sessionStorage.removeItem('hd_pending_code');
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      if (d.t && Date.now() - d.t > 20000) { dbg('Stored auth code is too old, fetching a new one'); return null; }
+      const out = { authCode: d.authCode, redirectUri: d.redirectUri, nonce: d.nonce, codeVerifier: d.codeVerifier };
+      if (d.iss) out.iss = d.iss;
+      return out;
+    };
+    // No usable code: go back to Auth0 for a fresh one (guard against redirect loops)
+    const fetchNewCode = e => {
       const last = +sessionStorage.getItem('hd_last_silent') || 0;
-      if (Date.now() - last < 8000) return e.reject('Could not obtain an Okta authorization code');
+      if (Date.now() - last < 8000) { dbg('ERROR: could not obtain an authorization code'); return e.reject('Could not obtain an authorization code'); }
       sessionStorage.setItem('hd_last_silent', Date.now());
+      dbg('Getting a fresh authorization code...');
       oktaAuthorize('code', { prompt: 'none', returnTo: location.pathname.split('/').pop() || 'dashboard.html' });
+    };
+    AuthProvider.registerCommand('getAuthCode', e => {
+      const out = takeCode();
+      dbg('Messenger asked for an auth code (getAuthCode). Code ready: ' + !!out);
+      if (out) return e.resolve(out);
+      fetchNewCode(e);
+    });
+    // Used when "session upgrade / step-up" is enabled: the visitor starts anonymous and Messenger asks us to sign in
+    AuthProvider.registerCommand('signIn', e => {
+      const out = takeCode();
+      dbg('Messenger asked to sign in (signIn). Code ready: ' + !!out);
+      if (out) { AuthProvider.publish('signedIn', out); return e.resolve(out); }
+      fetchNewCode(e);
     });
     AuthProvider.registerCommand('reAuthenticate', e => {
       oktaAuthorize('code', { returnTo: location.pathname.split('/').pop() || 'dashboard.html' });
       e.resolve();
     });
+    AuthProvider.subscribe('Auth.authError', err => dbg('Genesys Auth ERROR: ' + JSON.stringify(err)));
     AuthProvider.ready();
+    dbg('AuthProvider plugin registered');
   });
 }
 
