@@ -142,6 +142,10 @@ function initMessenger(s) {
     document.head.appendChild(ys);
   })(window, 'Genesys', 'https://apps.' + ({ 'prod-usw2': 'usw2.pure.cloud', 'prod-euw1': 'mypurecloud.ie', 'prod-aps1': 'aps1.pure.cloud', 'prod-apse2': 'mypurecloud.com.au', 'prod-apne1': 'mypurecloud.jp', 'prod-cac1': 'cac1.pure.cloud', 'prod-euw2': 'euw2.pure.cloud', 'prod-euc1': 'mypurecloud.de' }[GENESYS.environment] || 'mypurecloud.com') + '/genesys-bootstrap/genesys.min.js',
     { environment: GENESYS.environment, deploymentId: GENESYS.deploymentId });
+  // Report the authentication setting Genesys is currently serving for this deployment
+  fetch('https://api-cdn.' + ({ 'prod-usw2': 'usw2.pure.cloud', 'prod-euw1': 'mypurecloud.ie', 'prod-aps1': 'aps1.pure.cloud', 'prod-apse2': 'mypurecloud.com.au', 'prod-apne1': 'mypurecloud.jp', 'prod-cac1': 'cac1.pure.cloud', 'prod-euw2': 'euw2.pure.cloud', 'prod-euc1': 'mypurecloud.de' }[GENESYS.environment] || 'mypurecloud.com') + '/webdeployments/v1/deployments/' + GENESYS.deploymentId + '/config.json', { cache: 'no-store' })
+    .then(r => r.json()).then(j => dbg('Genesys deployment auth setting: ' + JSON.stringify(j.auth || 'none (authentication OFF)')))
+    .catch(err => dbg('Could not read deployment config: ' + err.message));
   // Authenticated messaging: hand Messenger an Okta authorization code when it asks for one
   Genesys('registerPlugin', 'AuthProvider', AuthProvider => {
     // Returns the stored auth code if it is still fresh (codes are single-use and short-lived), else null
